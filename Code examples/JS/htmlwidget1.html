@@ -1,0 +1,360 @@
+﻿
+    <script type="text/javascript">
+        (function () {
+            // jQuery variable
+            var jQuery;
+            // Load jQuery if not present
+            if (window.jQuery === undefined || window.jQuery.fn.jquery !== '2.1.1') {
+                var script_tag = document.createElement('script');
+                script_tag.setAttribute("type", "text/javascript");
+                script_tag.setAttribute("src",
+                    "http://ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js");
+                if (script_tag.readyState) {
+                    script_tag.onreadystatechange = function () { // For old versions of IE
+                        if (this.readyState == 'complete' || this.readyState == 'loaded') {
+                            scriptLoadHandler();
+                        }
+                    };
+                } else { // Other browsers
+                    script_tag.onload = scriptLoadHandler;
+                }
+                // Try to find the head, otherwise default to the documentElement
+                (document.getElementsByTagName("head")[0] || document.documentElement).appendChild(script_tag);
+            } else {
+                // The jQuery version on the window is the one we want to use
+                jQuery = window.jQuery;
+                main();
+            }
+
+            // Called once jQuery has loaded
+            function scriptLoadHandler() {
+                // Restore $ and window.jQuery to their previous values and store the
+                // new jQuery in our local jQuery variable
+                jQuery = window.jQuery.noConflict(true);
+                // Call main function
+                main();
+            }
+            function setCookie(key, value) {
+                var expires = new Date();
+                expires.setTime(expires.getTime() + 31536000000); //1 year  
+                document.cookie = key + '=' + value + ';expires=' + expires.toUTCString();
+            }
+
+            function getCookie(key) {
+                var keyValue = document.cookie.match('(^|;) ?' + key + '=([^;]*)(;|$)');
+                return keyValue ? keyValue[2] : null;
+            }
+            function getSessionId() {
+                var my_session = getCookie('session_id');
+                if (my_session == null)
+                {
+                    my_session = Math.random().toString(36).replace(/[^a-z]+/g, '').substr(0, 10);
+                    setCookie('session_id', my_session);
+                }
+                return my_session;
+            }
+
+            // Main function
+            function main() {
+                var accessToken = "3641709747d8482e9f005c878aad9e5b",
+                     baseUrl = "https://api.api.ai/v1/",
+                     $speechInput,
+                     $recBtn,
+                     recognition,
+                     messageRecording = "Recording...",
+                     messageCouldntHear = "I couldn't hear you, could you say that again?",
+                     messageInternalError = "Oh no, there has been an internal server error",
+                     messageSorry = "I'm sorry, I don't have the answer to that yet.";
+               
+                var sessionIdVar = getSessionId();
+                jQuery(document).ready(function ($) {
+                    $speechInput = $("#speech-nicewidget");
+                    $recBtn = $("#rec-nicewidget-mic");
+                    $closeBtn = $("#close-btn");
+                    $speechInput.keypress(function (event) {
+                        if (event.which == 13) {
+                            event.preventDefault();
+                            send();
+                        }
+                    });
+                    $recBtn.on("click", function (event) {
+                        switchRecognition();
+                    });
+                    $closeBtn.on("click", function (event) {
+                        hideSpeechRecognitionText();
+                    })
+                });
+
+                    function startRecognition() {
+                        recognition = new webkitSpeechRecognition();
+                        recognition.continuous = false;
+                        recognition.interimResults = false;
+                        recognition.onstart = function (event) {
+                            respond(messageRecording);
+                            updateRec();
+                        };
+                        recognition.onresult = function (event) {
+                            recognition.onend = null;
+                            var text = "";
+                            for (var i = event.resultIndex; i < event.results.length; ++i) {
+                                text += event.results[i][0].transcript;
+                            }
+                            setInput(text);
+                            stopRecognition();
+                        };
+                        recognition.onend = function () {
+                            respond(messageCouldntHear);
+                            stopRecognition();
+                        };
+                        recognition.lang = "en-US";
+                        recognition.start();
+                    }
+
+                    function stopRecognition() {
+                        if (recognition) {
+                            recognition.stop();
+                            recognition = null;
+                        }
+                        updateRec();
+                    }
+
+                    function switchRecognition() {
+                        if (recognition) {
+                            stopRecognition();
+                        } else {
+                            startRecognition();
+                        }
+                    }
+
+                    function setInput(text) {
+                        $speechInput.show();
+                        $speechInput.val(text);
+                        send();
+                    }
+
+                    function updateRec() {
+                        $recBtn.attr("class", recognition ? "nicewidget-gn green glow" : "nicewidget-gn red glow");
+                    }
+
+                    function send() {
+                        var text = $speechInput.val();
+                        $.ajax({
+                            type: "POST",
+                            url: baseUrl + "query",
+                            contentType: "application/json; charset=utf-8",
+                            dataType: "json",
+                            headers: {
+                                "Authorization": "Bearer " + accessToken
+                            },
+                            data: JSON.stringify({ query: text, lang: "en", sessionId: sessionIdVar }),
+
+                            success: function (data) {
+                                prepareResponse(data);
+                            },
+                            error: function () {
+                                respond(messageInternalError);
+                            }
+                        });
+                    }
+
+                    function prepareResponse(val) {
+                        var deJSON = JSON.stringify(val, undefined, 2),
+                          spokenResponse = val.result.speech;
+                        respond(spokenResponse);
+                        receiveAction(deJSON);
+                    }
+
+                    function receiveAction(val) {
+                        console.debug("Debug info: " + val);
+                        var obj = jQuery.parseJSON(val);
+                        var action;
+                        if (obj.result.parameters.Page != null) {
+                            action = obj.result.parameters.Page;
+                        } else {
+                            action = obj.result.parameters.Basics;
+                        }
+                        $.ajax({
+                            url: "http://localhost:44319/api/ActionParameter/Get",
+                            data: { "authcode": "stringtoreplace", "actionType": obj.result.action, "action": action }
+                        }).then(function (data) {
+                            console.log(data);
+
+                            if (data != "Parameter not found") {
+                                
+                                document.location = data;
+                            } else {
+                                respond("I'm sorry. This website doesn't have such parameter configured.")
+                            }
+                        });
+                    }
+
+                    function respond(val) {
+                        if (val == "") {
+                            val = messageSorry;
+                        }
+
+                        if (val !== messageRecording) {
+                            var msg = new SpeechSynthesisUtterance();
+                            msg.voiceURI = "native";
+                            msg.text = val;
+                            msg.lang = "en-US";
+                            window.speechSynthesis.speak(msg);
+                        }
+                        $("#spokenResponse-nicewidget").addClass("is-active").find(".spoken-response_text-nicewidget").html(val);
+                        $("#close-btn").addClass("active");
+                        setTimeout(function () {
+                            hideSpeechRecognitionText();
+                        }, 15000 );
+                    }
+                    function hideSpeechRecognitionText()
+                    {
+                        $("#close-btn").removeClass("active");
+                        $speechInput.hide();
+                        $('#spokenResponse-nicewidget').removeClass("is-active");
+                    }
+            }
+        })(); // We call our anonymous function immediately
+
+    </script>
+    <style type="text/css">
+        .container-nicewidget {
+              position: fixed;
+              bottom: 0px;
+              right: 15px;
+              margin-bottom:8%;
+        }
+
+        input#speech-nicewidget {
+            background-color: #E8F5E9;
+            border: 1px solid #3F7F93;
+            color: #000;
+            display:none;
+            font-size: 20px;
+            line-height: 43px;
+            padding: 0 0.75em;
+            width: 400px;
+            -webkit-transition: all 0.55s ease-in;
+            /*-webkit-border-top-left-radius: 30px;
+            -webkit-border-top-right-radius: 30px;
+            -moz-border-radius-topleft: 30px;
+            -moz-border-radius-topright: 30px;
+            border-top-left-radius: 30px;
+            border-top-right-radius: 30px;*/
+        }
+        input#speech-nicewidget:active, input:focus, textarea:active, textarea:focus {
+            outline: 1px solid #48788B;
+        }
+        .spoken-response-nicewidget {
+            max-height: 0;
+            overflow: hidden;
+            -webkit-transition: all 0.35s ease-in;
+        }
+        .spoken-response-nicewidget.is-active {
+            max-height: 400px;
+        }
+
+        .spoken-response_text-nicewidget {
+            background-color: #4CAF50;
+            color: #000000;
+            padding: 1em;
+
+        }
+
+        body .nicewidget-gn {font-size: 7px;}
+        .nicewidget-gn {
+          position: fixed;
+          bottom: 0px;
+          right: 15px;
+          margin: 3% auto;
+          border-radius:50%;
+          width:10em; height:10em;
+        }
+        .red {
+            background-color:#FE2222;
+        }
+        .green {
+            background-color:#43A047;
+        }
+        .container-nicewidget:before,  .container-nicewidget:after, .nicewidget-gn:before, .nicewidget-gn:after,
+        .nicewidget-mc:before, .nicewidget-mc:after{
+          content:'';
+          position:absolute;
+          /*background-color:#fff;*/
+        }
+        .nicewidget-gn:after{
+          top:30%; left:43%;
+          height:15%; width:14%;
+          border-top-left-radius:50%;
+          border-top-right-radius:50%;
+          background-color:#fff;
+        }
+        .nicewidget-gn:before{
+          top:40%; left:43%;
+          height:15%; width:14%;
+          border-bottom-left-radius:50%;
+          border-bottom-right-radius:50%;
+          background-color:#fff;
+        }
+        .nicewidget-mc{
+          position:absolute;
+          top:50%; left:37%;
+          height:24%;
+          width:26.5%;
+          overflow:hidden;
+        }
+        .nicewidget-mc:before{
+          bottom:50%;
+          width:100%; height:100%;
+          box-sizing:border-box;
+          border-radius:50%;
+          border:0.5em solid #fff;
+          background:none;
+        }
+        .nicewidget-mc:after{
+          background-color:#fff;
+          top:50%; left:40%;
+          width:20%; height:25%;
+        }
+        /* Glow */
+        .glow {
+	        display: inline-block;
+	        transition-duration: .3s;
+	        transition-property: box-shadow;
+	        -webkit-tap-highlight-color: rgba(0,0,0,0);
+	        transform: translateZ(0);
+	        box-shadow: 0 0 1px rgba(0, 0, 0, 0);        
+        }
+        .glow:hover {
+		        box-shadow: 0 0 15px  rgba(0, 0, 0, .8);
+	        }
+        /* Close Button */
+
+        [class*='close-'] {
+          color: #777;
+          background-color:#E8F5E9!important;
+          font: 14px/100% arial, sans-serif;
+          position: absolute;
+          right: 20px;
+          text-decoration: none;
+          text-shadow: 0 1px 0 #fff;
+          top: 5px;
+          display:none;
+        }
+        a#close-btn.active {
+            display:block!important;
+        }
+        .close-thik:after {
+          content: '✖'; /* UTF-8 symbol */
+        }
+
+    </style>
+    <div class="container-nicewidget">
+        <input id="speech-nicewidget" type="text">
+        <div id="spokenResponse-nicewidget" class="spoken-response-nicewidget">
+            <a id="close-btn" class="close-thik"></a>
+            <div class="spoken-response_text-nicewidget"></div>
+        </div>
+    </div>
+    <div id="rec-nicewidget-mic" class="nicewidget-gn red glow"><div class="nicewidget-mc"></div></div>
+   
+
